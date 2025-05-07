@@ -1,0 +1,102 @@
+---
+title: "DEG"
+output: html_document
+date: "2025-04-28"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+setwd("/scratch/work/courses/AppliedGenomicsSec3/groups/group4/DEG/")
+```
+
+```{r}
+library(limma)
+library(edgeR)
+library(ggplot2)
+library(Matrix)
+library(ggrepel)
+```
+
+```{r}
+counts = read.csv("20200513_Mouse_PatchSeq_Release_count.v2.csv",row.names = 1)
+metadata = read.csv("metadata.csv",row.names = 1)
+metadata$Cell.Type = gsub(" .*","",metadata$Cell.Type)
+colnames(counts) = gsub("[.]","-",colnames(counts))
+```
+
+```{r}
+counts = counts[,rownames(metadata)]
+```
+
+```{r}
+dge <- DGEList(counts = counts)
+```
+
+```{r}
+keep <- rowSums(counts > 10) >= 3
+dge <- dge[keep, , keep.lib.sizes=FALSE]
+```
+
+```{r}
+dge <- calcNormFactors(dge)
+```
+
+```{r}
+metadata$Cell.Type <- factor(metadata$Cell.Type)
+design <- model.matrix(~ 0 + metadata$Cell.Type)
+colnames(design) <- levels(metadata$Cell.Type)
+```
+
+```{r}
+v <- voom(dge, design, plot = TRUE)
+```
+
+```{r}
+fit <- lmFit(v, design)
+```
+
+```{r}
+contrast_matrix <- makeContrasts(Pvalb - (Sst + Sncg + Vip + Lamp5)/4, levels = design)
+
+fit2 <- contrasts.fit(fit, contrast_matrix)
+fit2 <- eBayes(fit2)
+
+deg = topTable(fit2, number = Inf)
+```
+
+```{r}
+genes_to_annotate = rownames(topTable(fit2,number=50))
+deg$gene = rownames(deg)
+```
+
+
+```{r}
+deg$threshold <- with(deg, ifelse(adj.P.Val < 0.01 & abs(logFC) > 2, "Significant", "Not Significant"))
+
+# Volcano plot
+ggplot(deg, aes(x = logFC, y = -log10(adj.P.Val))) +
+  geom_point(aes(color = threshold), alpha = 0.8) +
+  scale_color_manual(values = c("grey", "red")) +
+  theme_minimal() +
+  geom_text_repel(data = subset(deg, gene %in% genes_to_annotate),
+                  aes(label = gene),
+                  size = 3) +
+  labs(title = "Pvalb & Vip", x = "log2 Fold Change", y = "-log10(p-value)") +
+  theme(legend.title = element_blank())
+```
+
+```{r}
+res = rownames(deg[deg$threshold == "Significant",])
+```
+
+```{r}
+saveRDS(res,file="deg")
+```
+
+
+
+
+

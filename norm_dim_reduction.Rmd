@@ -1,0 +1,102 @@
+---
+title: "Normalization, PCA, UMAP, K-Means Clustering, K Nearest Neighbors"
+output: html_document
+date: "2025-04-24"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(sctransform)
+library(dplyr)
+library(tibble)
+```
+
+```{r}
+metadata <- read.csv(
+  file = "./metadata.csv"
+)
+```
+
+```{r}
+counts <- read.csv(
+  file = "./20200513_Mouse_PatchSeq_Release_count.v2.csv",
+  row.names = 1,           # if first column has gene names
+  check.names = FALSE      # so column names stay as barcodes
+)
+
+# 2. Convert to matrix (optional but recommended)
+counts_mat <- as.matrix(counts)
+
+# 3. Create a Seurat object
+seurat_obj <- CreateSeuratObject(
+  counts = counts_mat,
+  project = "MousePatchSeq"
+)
+```
+
+```{r}
+metadata <- metadata %>%
+  mutate(Transcriptomics_id = as.character(Transcriptomics_id)) %>%   # safety
+  column_to_rownames("Transcriptomics_id") 
+
+common <- intersect(colnames(seurat_obj), rownames(metadata))
+```
+```{r}
+seurat_obj <- subset(seurat_obj, cells = common)
+
+metadata <- metadata[colnames(seurat_obj), , drop = FALSE]
+
+seurat_obj <- AddMetaData(seurat_obj, metadata = metadata)
+```
+
+```{r}
+# run sctransform, how does it work?
+mps <- SCTransform(seurat_obj, verbose = FALSE)
+```
+
+```{r}
+# These are now standard steps in the Seurat workflow for visualization and clustering
+umap_mps <- RunPCA(mps, verbose = FALSE)
+umap_mps <- RunUMAP(umap_mps, dims = 1:30, verbose = FALSE)
+
+umap_mps <- FindNeighbors(umap_mps, dims = 1:30, verbose = FALSE)
+umap_mps <- FindClusters(umap_mps, verbose = FALSE)
+```
+
+```{r}
+DimPlot(umap_mps, group.by = "Cell.Type", label = TRUE) + labs(title = "K-nearest neighbors")
+```
+```{r}
+DimPlot(umap_mps, label = TRUE)
+```
+
+```{r}
+pca_mps <- RunPCA(mps, verbose = FALSE)
+pca_embeddings <- Embeddings(pca_mps, "pca")
+#    This is an n_cells × n_pcs matrix
+
+# 3. Select how many PCs you want to cluster on (e.g. first 10)
+pc_choice <- 1:30
+pca_data <- pca_embeddings[, pc_choice]
+
+# 4. Run k-means
+set.seed(42)                        # for reproducibility
+k <- 5                              # choose number of clusters
+kmeans_res <- kmeans(pca_data, centers = k, nstart = 25)
+```
+
+```{r}
+pca_mps$kmeans_clusters <- as.factor(kmeans_res$cluster)
+
+# 6. (Optional) Visualize clusters on UMAP/t-SNE
+pca_mps <- RunUMAP(pca_mps, dims = pc_choice)
+DimPlot(pca_mps, group.by = "Cell.Type", reduction = "umap")
+```
+```{r}
+DimPlot(pca_mps, group.by = "Cell.Type", reduction = "umap", label=TRUE) + labs(title = "K-means")
+```
